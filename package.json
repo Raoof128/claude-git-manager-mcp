@@ -4,6 +4,15 @@
   "description": "Git Repository Manager MCP for Claude Desktop with full repository control",
   "type": "module",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "claude-git-manager": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/Raoof128/claude-git-manager-mcp.git"
@@ -17,8 +26,15 @@
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
     "lint": "eslint src/**/*.ts",
-    "format": "prettier --write src/**/*.ts"
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "format": "prettier --write src/**/*.ts",
+    "format:check": "prettier --check src/**/*.ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm test && npm run lint",
+    "clean": "rm -rf dist coverage"
   },
   "keywords": [
     "mcp",

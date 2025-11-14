@@ -1,6 +1,26 @@
 # Git Repository Manager MCP
 
+[![npm version](https://img.shields.io/npm/v/claude-git-manager-mcp.svg)](https://www.npmjs.com/package/claude-git-manager-mcp)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
+[![CI](https://github.com/Raoof128/claude-git-manager-mcp/workflows/CI/badge.svg)](https://github.com/Raoof128/claude-git-manager-mcp/actions)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)](https://www.typescriptlang.org/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Code of Conduct](https://img.shields.io/badge/code%20of-conduct-ff69b4.svg)](CODE_OF_CONDUCT.md)
+
 A powerful Model Context Protocol (MCP) server that gives Claude Desktop full control over Git repositories. This MCP enables Claude to read, analyze, modify, commit, branch, merge, and refactor code based on natural language instructions.
+
+## 📚 Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Available Tools](#available-tools)
+- [Safety & Security](#safety--security)
+- [Examples](#examples)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Features
 
@@ -194,17 +214,53 @@ npm run lint
 - Claude Desktop
 - Optional: GitHub CLI for PR creation
 
-## Contributing
+## 📖 Documentation
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
+- **[Installation Guide](INSTALLATION.md)** - Detailed setup instructions
+- **[Contributing Guidelines](CONTRIBUTING.md)** - How to contribute
+- **[Security Policy](SECURITY.md)** - Security best practices and reporting
+- **[Code of Conduct](CODE_OF_CONDUCT.md)** - Community guidelines
+- **[Changelog](CHANGELOG.md)** - Version history and updates
+- **[Examples](examples/)** - Configuration examples and use cases
 
-## License
+## 🤝 Contributing
 
-MIT License - see LICENSE file for details.
+Contributions are welcome! Please:
+
+1. Read the [Contributing Guidelines](CONTRIBUTING.md)
+2. Fork the repository
+3. Create a feature branch (`git checkout -b feat/amazing-feature`)
+4. Make your changes with tests
+5. Commit using [Conventional Commits](https://www.conventionalcommits.org/)
+6. Push to your branch
+7. Open a Pull Request
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+
+## 🔒 Security
+
+For security concerns, please review our [Security Policy](SECURITY.md) and report vulnerabilities through GitHub's security advisory feature.
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- Built with the [Model Context Protocol SDK](https://github.com/modelcontextprotocol)
+- Powered by [simple-git](https://github.com/steveukx/git-js)
+- Type-safe with [Zod](https://github.com/colinhacks/zod)
+- TypeScript AST analysis with [TypeScript Compiler API](https://github.com/microsoft/TypeScript)
+
+## 📞 Support
+
+- 📫 [Open an issue](https://github.com/Raoof128/claude-git-manager-mcp/issues/new/choose)
+- 💬 [Discussions](https://github.com/Raoof128/claude-git-manager-mcp/discussions)
+- 📖 [Documentation](https://github.com/Raoof128/claude-git-manager-mcp#readme)
+
+## ⭐ Show Your Support
+
+Give a ⭐️ if this project helped you!
 
 ## Architecture
 
@@ -227,3 +283,9 @@ You: "Fix the TypeScript errors in auth.ts and commit the changes"
 ```
 
 This MCP transforms Claude into a powerful AI pair programmer that can understand your codebase, make intelligent changes, and manage your Git workflow - all through natural language conversation.
+
+---
+
+<p align="center">
+  Made with ❤️ for the Claude Desktop community
+</p>

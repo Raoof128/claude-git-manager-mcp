@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "git-manager": {
+      "command": "node",
+      "args": ["/path/to/claude-git-manager-mcp/dist/index.js"],
+      "env": {
+        "GIT_MANAGER_CONFIG": "{\"permissionLevel\":\"safe\",\"safety\":{\"require_confirmation\":{\"destructive_operations\":true,\"branch_changes\":true,\"file_modifications\":true,\"git_commands\":[\"reset\",\"clean\",\"push\",\"merge\",\"rebase\"]},\"backup_strategy\":{\"auto_stash\":true,\"create_snapshots\":true,\"max_rollback_depth\":15},\"validation\":{\"check_tests_before_commit\":true,\"lint_before_commit\":true,\"require_clean_working_dir\":true,\"protected_branches\":[\"main\",\"master\",\"production\",\"develop\"]}}}"
+      }
+    }
+  }
+}
