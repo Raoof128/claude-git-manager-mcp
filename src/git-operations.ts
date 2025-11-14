@@ -3,7 +3,6 @@ import * as fs from 'fs-extra';
 import { readFile, writeFile } from 'fs/promises';
 import * as path from 'path';
 import { glob } from 'glob';
-import { minimatch } from 'minimatch';
 import * as diff from 'diff';
 import {
   Config,
@@ -16,12 +15,13 @@ import {
   GetFileContextSchema,
   CreateBranchSchema,
   ModifyFilesSchema,
-  CommitChangesSchema,
-  RefactorCodeSchema,
-  MergeBranchesSchema,
-  CreatePullRequestSchema,
-  RunGitCommandSchema
+  CommitChangesSchema
 } from './types.js';
+
+// Constants
+const IGNORED_DIRS = ['node_modules/**', '.git/**', 'dist/**', 'build/**', 'coverage/**', '.next/**'];
+const DEFAULT_CONTEXT_LINES = 2;
+const README_FILES = ['README.md', 'readme.md', 'Readme.md'];
 
 export class GitOperations {
   constructor(
@@ -29,9 +29,71 @@ export class GitOperations {
     private config: Config
   ) {}
 
+  /**
+   * Validates that a file path is safe and within the repository
+   * @param repoPath The repository root path
+   * @param filePath The file path to validate
+   * @throws Error if path traversal is detected
+   */
+  private validatePath(repoPath: string, filePath: string): void {
+    const resolvedRepo = path.resolve(repoPath);
+    const resolvedFile = path.resolve(repoPath, filePath);
+
+    if (!resolvedFile.startsWith(resolvedRepo)) {
+      throw new Error(`Path traversal detected: ${filePath} is outside repository`);
+    }
+  }
+
+  /**
+   * Validates that the repository path exists and is a valid git repository
+   * @param repoPath The repository root path
+   * @throws Error if path is not a valid git repository
+   */
+  private async validateRepository(repoPath: string): Promise<void> {
+    try {
+      // Check if path exists
+      if (!await fs.pathExists(repoPath)) {
+        throw new Error(`Repository path does not exist: ${repoPath}`);
+      }
+
+      // Check if it's a directory
+      const stats = await fs.stat(repoPath);
+      if (!stats.isDirectory()) {
+        throw new Error(`Repository path is not a directory: ${repoPath}`);
+      }
+
+      // Check if it's a git repository
+      const gitDir = path.join(repoPath, '.git');
+      const hasGitDir = await fs.pathExists(gitDir);
+
+      if (!hasGitDir) {
+        // Try to verify with git command
+        try {
+          await this.git.revparse(['--git-dir']);
+        } catch {
+          throw new Error(`Path is not a git repository: ${repoPath}`);
+        }
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(`Failed to validate repository: ${error}`);
+    }
+  }
+
+  /**
+   * Analyzes a git repository and returns comprehensive information
+   * @param params Analysis parameters including repo path and options
+   * @returns Repository analysis including status, stats, and health information
+   * @throws Error if repository is invalid or inaccessible
+   */
   async analyseRepository(params: any): Promise<RepositoryAnalysis> {
     const validatedParams = AnalyseRepositorySchema.parse(params);
     const { repo_path, include_stats = false, check_health = false } = validatedParams;
+
+    // Validate repository
+    await this.validateRepository(repo_path);
 
     // Get basic status
     const status = await this.git.status();
@@ -56,7 +118,7 @@ export class GitOperations {
       // Count lines of code
       const files = await glob('**/*', {
         cwd: repo_path,
-        ignore: ['node_modules/**', '.git/**', 'dist/**', 'build/**'],
+        ignore: IGNORED_DIRS,
         nodir: true
       });
 
@@ -80,14 +142,20 @@ export class GitOperations {
 
     // Add health check if requested
     if (check_health) {
-      const hasReadme = await fs.pathExists(path.join(repo_path, 'README.md')) ||
-                       await fs.pathExists(path.join(repo_path, 'readme.md'));
+      // Check for README files
+      let hasReadme = false;
+      for (const readmeFile of README_FILES) {
+        if (await fs.pathExists(path.join(repo_path, readmeFile))) {
+          hasReadme = true;
+          break;
+        }
+      }
       const hasGitignore = await fs.pathExists(path.join(repo_path, '.gitignore'));
 
       // Check for test files
       const testFiles = await glob('**/*{test,spec}*', {
         cwd: repo_path,
-        ignore: ['node_modules/**'],
+        ignore: IGNORED_DIRS,
         nodir: true
       });
 
@@ -101,6 +169,12 @@ export class GitOperations {
     return analysis;
   }
 
+  /**
+   * Searches for code patterns across the repository
+   * @param params Search parameters including pattern and file filters
+   * @returns Array of search results with file locations and context
+   * @throws Error if search fails
+   */
   async searchCode(params: any): Promise<SearchResult[]> {
     const validatedParams = SearchCodeSchema.parse(params);
     const { repo_path, pattern, file_types = [], include_git_history = false } = validatedParams;
@@ -119,7 +193,7 @@ export class GitOperations {
 
     const files = await glob(filePattern, {
       cwd: repo_path,
-      ignore: ['node_modules/**', '.git/**', 'dist/**', 'build/**'],
+      ignore: IGNORED_DIRS,
       nodir: true
     });
 
@@ -136,7 +210,10 @@ export class GitOperations {
               file,
               line: index + 1,
               content: line.trim(),
-              context: lines.slice(Math.max(0, index - 2), index + 3)
+              context: lines.slice(
+                Math.max(0, index - DEFAULT_CONTEXT_LINES),
+                index + DEFAULT_CONTEXT_LINES + 1
+              )
             });
           }
         });
@@ -168,9 +245,18 @@ export class GitOperations {
     return results;
   }
 
+  /**
+   * Retrieves comprehensive context for a file including content, blame, history, and imports
+   * @param params File context parameters
+   * @returns File context with requested information
+   * @throws Error if file is invalid or inaccessible
+   */
   async getFileContext(params: any): Promise<FileContext> {
     const validatedParams = GetFileContextSchema.parse(params);
     const { repo_path, file_path, include_blame = false, include_history = false, include_imports = false } = validatedParams;
+
+    // Validate path to prevent traversal attacks
+    this.validatePath(repo_path, file_path);
 
     const fullPath = path.join(repo_path, file_path);
     const content = await readFile(fullPath, 'utf-8');
@@ -213,9 +299,15 @@ export class GitOperations {
     return context;
   }
 
+  /**
+   * Creates and checks out a new git branch
+   * @param params Branch creation parameters
+   * @returns Operation result indicating success or failure
+   * @throws Error if branch creation fails
+   */
   async createBranch(params: any): Promise<OperationResult> {
     const validatedParams = CreateBranchSchema.parse(params);
-    const { repo_path, branch_name, from_branch = 'main', safety_check = true } = validatedParams;
+    const { branch_name, from_branch = 'main', safety_check = true } = validatedParams;
 
     if (safety_check) {
       const status = await this.git.status();
@@ -245,9 +337,20 @@ export class GitOperations {
     }
   }
 
+  /**
+   * Modifies multiple files atomically with optional preview
+   * @param params File modification parameters including changes array
+   * @returns Operation result with preview or confirmation of changes
+   * @throws Error if modifications fail
+   */
   async modifyFiles(params: any): Promise<OperationResult> {
     const validatedParams = ModifyFilesSchema.parse(params);
     const { repo_path, changes, preview = false } = validatedParams;
+
+    // Validate all file paths to prevent traversal attacks
+    for (const change of changes) {
+      this.validatePath(repo_path, change.file_path);
+    }
 
     if (preview) {
       // Generate preview of changes
@@ -271,7 +374,9 @@ export class GitOperations {
 
           if (change.line_changes) {
             const lines = originalContent.split('\n');
-            for (const lineChange of change.line_changes) {
+            // Sort line changes in reverse order to avoid index invalidation
+            const sortedChanges = [...change.line_changes].sort((a, b) => b.start_line - a.start_line);
+            for (const lineChange of sortedChanges) {
               const startIdx = lineChange.start_line - 1;
               const endIdx = lineChange.end_line;
               lines.splice(startIdx, endIdx - startIdx, lineChange.new_content);
@@ -311,7 +416,9 @@ export class GitOperations {
               const originalContent = await readFile(filePath, 'utf-8');
               const lines = originalContent.split('\n');
 
-              for (const lineChange of change.line_changes) {
+              // Sort line changes in reverse order to avoid index invalidation
+              const sortedChanges = [...change.line_changes].sort((a, b) => b.start_line - a.start_line);
+              for (const lineChange of sortedChanges) {
                 const startIdx = lineChange.start_line - 1;
                 const endIdx = lineChange.end_line;
                 lines.splice(startIdx, endIdx - startIdx, lineChange.new_content);
@@ -338,9 +445,15 @@ export class GitOperations {
     }
   }
 
+  /**
+   * Commits staged or specified files with conventional commit format
+   * @param params Commit parameters including message, type, and optional GPG signing
+   * @returns Operation result confirming commit
+   * @throws Error if commit fails or tests fail (if configured)
+   */
   async commitChanges(params: any): Promise<OperationResult> {
     const validatedParams = CommitChangesSchema.parse(params);
-    const { repo_path, message, type, scope, body, files, sign_commit = false } = validatedParams;
+    const { message, type, scope, body, files, sign_commit = false } = validatedParams;
 
     try {
       // Run tests if configured

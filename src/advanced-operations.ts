@@ -23,9 +23,29 @@ export class AdvancedOperations {
     this.conflictResolver = new ConflictResolver(git);
   }
 
+  /**
+   * Validates that a file path is safe and within the repository
+   * @param repoPath The repository root path
+   * @param filePath The file path to validate
+   * @throws Error if path traversal is detected
+   */
+  private validatePath(repoPath: string, filePath: string): void {
+    const resolvedRepo = path.resolve(repoPath);
+    const resolvedFile = path.resolve(repoPath, filePath);
+
+    if (!resolvedFile.startsWith(resolvedRepo)) {
+      throw new Error(`Path traversal detected: ${filePath} is outside repository`);
+    }
+  }
+
   async refactorCode(params: any): Promise<OperationResult> {
     const validatedParams = RefactorCodeSchema.parse(params);
     const { repo_path, operation, target, new_value, update_references = true } = validatedParams;
+
+    // Validate target file path
+    if (target.file) {
+      this.validatePath(repo_path, target.file);
+    }
 
     try {
       switch (operation) {
@@ -57,7 +77,6 @@ export class AdvancedOperations {
   async mergeBranches(params: any): Promise<OperationResult> {
     const validatedParams = MergeBranchesSchema.parse(params);
     const {
-      repo_path,
       source_branch,
       target_branch,
       strategy,
@@ -135,7 +154,7 @@ export class AdvancedOperations {
 
   async createPullRequest(params: any): Promise<OperationResult> {
     const validatedParams = CreatePullRequestSchema.parse(params);
-    const { repo_path, title, description, base_branch, head_branch, labels, reviewers } = validatedParams;
+    const { title, description, base_branch, head_branch, labels, reviewers } = validatedParams;
 
     try {
       // Check if we have GitHub CLI available
@@ -193,7 +212,7 @@ export class AdvancedOperations {
 
   async runGitCommand(params: any): Promise<OperationResult> {
     const validatedParams = RunGitCommandSchema.parse(params);
-    const { repo_path, command, interactive = false, dry_run = false } = validatedParams;
+    const { command, dry_run = false } = validatedParams;
 
     // Security check: prevent dangerous commands
     const dangerousCommands = ['rm', 'reset --hard', 'clean -fd', 'push --force'];
@@ -237,9 +256,9 @@ export class AdvancedOperations {
     repo_path: string,
     target: any,
     newName: string,
-    updateReferences: boolean
+    _updateReferences: boolean
   ): Promise<OperationResult> {
-    const { file, symbol } = target;
+    const { symbol } = target;
 
     if (!symbol) {
       return {
@@ -328,11 +347,65 @@ export class AdvancedOperations {
   }
 
   private async inlineVariable(repo_path: string, target: any): Promise<OperationResult> {
-    // Simplified implementation - in reality would need AST parsing
-    return {
-      success: true,
-      message: 'Inline variable operation completed (simplified implementation)'
-    };
+    const { file, symbol } = target;
+
+    if (!symbol) {
+      return {
+        success: false,
+        message: 'Symbol name is required for inline variable operation'
+      };
+    }
+
+    try {
+      const sourceFile = path.join(repo_path, file);
+      const content = await readFile(sourceFile, 'utf-8');
+      const lines = content.split('\n');
+
+      // Find variable declaration and its value
+      let variableValue: string | null = null;
+      let declarationLineIdx = -1;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        // Match variable declarations like: const symbol = value; or let symbol = value;
+        const match = line.match(new RegExp(`(?:const|let|var)\\s+${symbol}\\s*=\\s*(.+?);`));
+        if (match) {
+          variableValue = match[1].trim();
+          declarationLineIdx = i;
+          break;
+        }
+      }
+
+      if (!variableValue || declarationLineIdx === -1) {
+        return {
+          success: false,
+          message: `Could not find variable declaration for '${symbol}'`
+        };
+      }
+
+      // Replace all references with the value and remove declaration
+      const symbolRegex = new RegExp(`\\b${symbol}\\b`, 'g');
+      const newLines = lines.filter((_, idx) => idx !== declarationLineIdx)
+        .map(line => line.replace(symbolRegex, variableValue));
+
+      await writeFile(sourceFile, newLines.join('\n'));
+
+      return {
+        success: true,
+        message: `Inlined variable '${symbol}' with value '${variableValue}'`,
+        details: {
+          variable: symbol,
+          value: variableValue,
+          occurrences: content.split(symbol).length - 1
+        }
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: `Failed to inline variable: ${error}`,
+        details: error
+      };
+    }
   }
 
   private async moveToFile(
@@ -340,11 +413,71 @@ export class AdvancedOperations {
     target: any,
     newFileName: string
   ): Promise<OperationResult> {
-    // Similar to extract function but for entire constructs
-    return {
-      success: true,
-      message: `Moved code to ${newFileName}`
-    };
+    const { file, start_line, end_line, symbol } = target;
+
+    if (!start_line || !end_line) {
+      return {
+        success: false,
+        message: 'Start and end line numbers are required for move operation'
+      };
+    }
+
+    try {
+      const sourceFile = path.join(repo_path, file);
+      const content = await readFile(sourceFile, 'utf-8');
+      const lines = content.split('\n');
+
+      // Extract the code to move
+      const codeToMove = lines.slice(start_line - 1, end_line).join('\n');
+
+      // Determine file extension for proper imports
+      const fileExt = path.extname(file);
+      const newFile = newFileName.endsWith(fileExt) ? newFileName : `${newFileName}${fileExt}`;
+      const newFilePath = path.join(repo_path, newFile);
+
+      // Create or append to the new file
+      let newFileContent = '';
+      if (await fs.pathExists(newFilePath)) {
+        newFileContent = await readFile(newFilePath, 'utf-8');
+        newFileContent += '\n\n' + codeToMove;
+      } else {
+        // Add appropriate header for new file
+        if (fileExt === '.ts' || fileExt === '.js') {
+          newFileContent = `// Moved from ${file}\n\n${codeToMove}`;
+        } else {
+          newFileContent = codeToMove;
+        }
+      }
+
+      await fs.ensureDir(path.dirname(newFilePath));
+      await writeFile(newFilePath, newFileContent);
+
+      // Remove from original file and add import reference
+      const remainingLines = [
+        ...lines.slice(0, start_line - 1),
+        `// Moved to ${newFile}${symbol ? ` - use: import { ${symbol} } from './${path.basename(newFile, fileExt)}'` : ''}`,
+        ...lines.slice(end_line)
+      ];
+
+      await writeFile(sourceFile, remainingLines.join('\n'));
+
+      return {
+        success: true,
+        message: `Moved code from ${file} to ${newFile}`,
+        details: {
+          source_file: file,
+          target_file: newFile,
+          lines_moved: end_line - start_line + 1,
+          symbol: symbol || 'anonymous'
+        }
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: `Failed to move code: ${error}`,
+        details: error
+      };
+    }
   }
 
   private async updateImports(
@@ -391,7 +524,9 @@ export class AdvancedOperations {
 
   private async checkGitHubCli(): Promise<boolean> {
     try {
-      await this.git.raw(['--version']); // This won't work for gh, but demonstrates the pattern
+      // Use Node.js child_process to check if gh CLI is available
+      const { execSync } = await import('child_process');
+      execSync('gh --version', { stdio: 'ignore' });
       return true;
     } catch {
       return false;

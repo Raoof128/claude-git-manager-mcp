@@ -8,8 +8,14 @@ import simpleGit from 'simple-git';
 import { GitOperations } from './git-operations.js';
 import { AdvancedOperations } from './advanced-operations.js';
 import { SafetyValidator } from './safety.js';
-import { TypeScriptIntegration } from './typescript-integration.js';
 import { Config, PermissionLevel, ConfigSchema } from './types.js';
+
+// Constants
+const SERVER_NAME = 'git-manager';
+const SERVER_VERSION = '1.0.0';
+const DEFAULT_MAX_ROLLBACK_DEPTH = 10;
+const DEFAULT_PROTECTED_BRANCHES = ['main', 'master', 'production'];
+const DANGEROUS_GIT_COMMANDS = ['reset --hard', 'clean -fd', 'push --force'];
 
 // Default configuration
 const defaultConfig: Config = {
@@ -19,18 +25,18 @@ const defaultConfig: Config = {
       destructive_operations: true,
       branch_changes: false,
       file_modifications: false,
-      git_commands: ['reset --hard', 'clean -fd', 'push --force']
+      git_commands: DANGEROUS_GIT_COMMANDS
     },
     backup_strategy: {
       auto_stash: true,
       create_snapshots: true,
-      max_rollback_depth: 10
+      max_rollback_depth: DEFAULT_MAX_ROLLBACK_DEPTH
     },
     validation: {
       check_tests_before_commit: false,
       lint_before_commit: false,
       require_clean_working_dir: false,
-      protected_branches: ['main', 'master', 'production']
+      protected_branches: DEFAULT_PROTECTED_BRANCHES
     }
   }
 };
@@ -43,8 +49,8 @@ class GitManagerServer {
     this.config = this.loadConfig();
     this.server = new Server(
       {
-        name: 'git-manager',
-        version: '1.0.0'
+        name: SERVER_NAME,
+        version: SERVER_VERSION
       },
       {
         capabilities: {
@@ -367,7 +373,7 @@ class GitManagerServer {
             result = await safetyValidator.rollback(args.snapshot_tag as string);
             break;
 
-          case 'list_snapshots':
+          case 'list_snapshots': {
             const snapshots = await safetyValidator.getRollbackManager().listSnapshots();
             result = {
               success: true,
@@ -375,6 +381,7 @@ class GitManagerServer {
               details: { snapshots }
             };
             break;
+          }
 
           default:
             result = {
@@ -410,11 +417,22 @@ class GitManagerServer {
         };
 
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`Error executing ${name}:`, errorMessage);
+
         return {
           content: [
             {
               type: 'text',
-              text: `Error executing ${name}: ${error instanceof Error ? error.message : String(error)}`
+              text: JSON.stringify({
+                success: false,
+                message: `Operation '${name}' failed`,
+                error: errorMessage,
+                details: error instanceof Error ? {
+                  name: error.name,
+                  stack: error.stack?.split('\n').slice(0, 3).join('\n') // Include first 3 lines of stack
+                } : undefined
+              }, null, 2)
             }
           ]
         };
@@ -434,6 +452,8 @@ async function main(): Promise<void> {
   await server.run();
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Run if this is the main module
+const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
+if (isMain) {
   main().catch(console.error);
 }

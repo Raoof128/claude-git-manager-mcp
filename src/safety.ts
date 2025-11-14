@@ -1,7 +1,7 @@
 import { SimpleGit } from 'simple-git';
 import { Config, PermissionLevel, OperationResult } from './types.js';
 import { ConfirmationManager } from './confirmation-manager.js';
-import { RiskManager, RiskLevel } from './risk-manager.js';
+import { RiskManager } from './risk-manager.js';
 import { RollbackManager } from './rollback-manager.js';
 
 export class SafetyValidator {
@@ -218,49 +218,69 @@ export class ConflictResolver {
   }
 
   private async smartResolve(file: string): Promise<void> {
-    // Read the conflicted file
-    const content = await this.git.show([`:0:${file}`]).catch(() => '');
+    // Read the conflicted file directly from filesystem
+    const { readFile, writeFile } = await import('fs/promises');
+    const content = await readFile(file, 'utf-8');
 
-    // For now, implement a simple smart resolution
-    // In a full implementation, this could use AI or sophisticated heuristics
-
+    // Smart resolution with improved heuristics
     const lines = content.split('\n');
-    const resolved = [];
+    const resolved: string[] = [];
     let inConflict = false;
-    let oursSection = [];
-    let theirsSection = [];
+    let inTheirsSection = false;
+    const oursSection: string[] = [];
+    const theirsSection: string[] = [];
 
     for (const line of lines) {
       if (line.startsWith('<<<<<<<')) {
+        // Start of conflict marker
         inConflict = true;
-        oursSection = [];
-        theirsSection = [];
+        inTheirsSection = false;
+        oursSection.length = 0;
+        theirsSection.length = 0;
       } else if (line.startsWith('=======')) {
-        // Switch to theirs section
+        // Switch from ours to theirs section
+        inTheirsSection = true;
       } else if (line.startsWith('>>>>>>>')) {
+        // End of conflict marker - apply resolution strategy
         inConflict = false;
-        // Simple heuristic: prefer non-empty sections
-        if (oursSection.length > 0 && theirsSection.length === 0) {
-          resolved.push(...oursSection);
-        } else if (theirsSection.length > 0 && oursSection.length === 0) {
+        inTheirsSection = false;
+
+        // Smart heuristics for resolution:
+        // 1. If one section is empty, use the other
+        // 2. If sections are identical, use one copy
+        // 3. If both have content, prefer newer (theirs) with annotations
+        if (oursSection.length === 0 && theirsSection.length > 0) {
           resolved.push(...theirsSection);
+        } else if (theirsSection.length === 0 && oursSection.length > 0) {
+          resolved.push(...oursSection);
+        } else if (oursSection.join('\n') === theirsSection.join('\n')) {
+          // Sections are identical, use one copy
+          resolved.push(...oursSection);
         } else {
-          // Merge both sections
-          resolved.push(...oursSection, ...theirsSection);
+          // Both sections have different content - keep both with comment
+          resolved.push('// Merged conflict: kept both versions');
+          resolved.push(...oursSection);
+          if (theirsSection.some(l => l.trim() !== '')) {
+            resolved.push(...theirsSection);
+          }
         }
+
+        oursSection.length = 0;
+        theirsSection.length = 0;
       } else if (inConflict) {
-        if (theirsSection.length === 0) {
-          oursSection.push(line);
-        } else {
+        // Add line to appropriate section
+        if (inTheirsSection) {
           theirsSection.push(line);
+        } else {
+          oursSection.push(line);
         }
       } else {
+        // Regular line, not in conflict
         resolved.push(line);
       }
     }
 
-    // Write resolved content back
-    await this.git.raw(['checkout', '--ours', file]);
-    // In a real implementation, you'd write the resolved content to the file
+    // Write resolved content back to file
+    await writeFile(file, resolved.join('\n'));
   }
 }

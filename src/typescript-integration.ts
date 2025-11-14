@@ -349,36 +349,74 @@ export class TypeScriptIntegration {
 
   private analyzeCodeSelection(
     tempSourceFile: ts.SourceFile,
-    originalSourceFile: ts.SourceFile
+    _originalSourceFile: ts.SourceFile
   ): {
     parameters: Array<{ name: string; type: string }>;
     returnType: string;
   } {
     const parameters: Array<{ name: string; type: string }> = [];
     const usedVariables = new Set<string>();
+    const definedVariables = new Set<string>();
+    const builtIns = new Set(['console', 'Math', 'Date', 'Array', 'Object', 'String', 'Number',
+      'Boolean', 'undefined', 'null', 'true', 'false', 'this', 'window', 'document', 'process']);
 
     // Find all identifiers used in the selection
-    const visitor = (node: ts.Node) => {
-      if (ts.isIdentifier(node)) {
-        usedVariables.add(node.text);
+    const findUsed = (node: ts.Node) => {
+      if (ts.isIdentifier(node) && !builtIns.has(node.text)) {
+        // Check if this identifier is being referenced (not declared)
+        const parent = node.parent;
+        if (parent && !ts.isVariableDeclaration(parent) &&
+            !ts.isFunctionDeclaration(parent) &&
+            !ts.isParameter(parent)) {
+          usedVariables.add(node.text);
+        }
       }
-      ts.forEachChild(node, visitor);
+      ts.forEachChild(node, findUsed);
     };
 
-    visitor(tempSourceFile);
+    // Find all variables defined in the selection
+    const findDefined = (node: ts.Node) => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+        definedVariables.add(node.name.text);
+      }
+      if (ts.isFunctionDeclaration(node) && node.name) {
+        definedVariables.add(node.name.text);
+      }
+      if (ts.isParameter(node) && ts.isIdentifier(node.name)) {
+        definedVariables.add(node.name.text);
+      }
+      ts.forEachChild(node, findDefined);
+    };
 
-    // For each used variable, determine if it's defined outside the selection
+    findUsed(tempSourceFile);
+    findDefined(tempSourceFile);
+
+    // Parameters are variables used but not defined in the selection
     usedVariables.forEach(varName => {
-      // Simplified analysis - in a real implementation, this would be more sophisticated
-      parameters.push({
-        name: varName,
-        type: 'any' // Would need more sophisticated type inference
-      });
+      if (!definedVariables.has(varName) && !this.isValidIdentifier(varName)) {
+        return; // Skip invalid identifiers
+      }
+      if (!definedVariables.has(varName)) {
+        parameters.push({
+          name: varName,
+          type: 'any' // Type inference would require full type checker analysis
+        });
+      }
     });
+
+    // Analyze return type by checking for return statements
+    let hasReturn = false;
+    const checkReturn = (node: ts.Node) => {
+      if (ts.isReturnStatement(node) && node.expression) {
+        hasReturn = true;
+      }
+      ts.forEachChild(node, checkReturn);
+    };
+    checkReturn(tempSourceFile);
 
     return {
       parameters,
-      returnType: 'void' // Would need to analyze return statements
+      returnType: hasReturn ? 'any' : 'void'
     };
   }
 
